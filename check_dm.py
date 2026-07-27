@@ -30,31 +30,46 @@ async def main():
         sys.exit(f"config.yaml: {exc}")
 
     client = discord.Client(intents=discord.Intents.default())
+    failed = []
     try:
         # login must stay inside the try, or a bad token skips the close() below
         # and buries the real error under "Unclosed client session" warnings.
         await client.login(token)
-        user = await client.fetch_user(config["user_id"])
-        await user.send("Alarm bot test message — DMs are working.")
-        print(f"OK: sent a test DM to {user} ({user.id}).")
     except discord.LoginFailure:
+        await client.close()
         sys.exit(
             "Discord rejected the bot token in .env.\n"
             "Get a fresh one at https://discord.com/developers/applications "
             "-> your app -> Bot -> Reset Token."
         )
-    except discord.NotFound:
-        sys.exit(f"No Discord user with ID {config['user_id']}. Check user_id in config.yaml.")
-    except discord.Forbidden:
-        sys.exit(
-            f"Discord refused the DM to {config['user_id']}.\n"
-            "Invite the bot to a server you are in, and enable "
-            "Settings -> Content & Social -> allow DMs from server members."
-        )
-    except discord.HTTPException as exc:
-        sys.exit(f"Discord error: {exc}")
+
+    try:
+        # Every configured user is tested, and one failure doesn't hide the rest —
+        # knowing that two of three people are reachable is the useful answer.
+        for name, user_id in config["users"].items():
+            try:
+                user = await client.fetch_user(user_id)
+                await user.send("Alarm bot test message — DMs are working.")
+                print(f"OK:   {name} ({user}) — test DM sent.")
+            except discord.NotFound:
+                failed.append(name)
+                print(f"FAIL: {name} — no Discord user with ID {user_id}.")
+            except discord.Forbidden:
+                failed.append(name)
+                print(
+                    f"FAIL: {name} ({user_id}) — Discord refused the DM. They must share "
+                    "a server with the bot and enable Settings -> Content & Social -> "
+                    "allow DMs from server members."
+                )
+            except discord.HTTPException as exc:
+                failed.append(name)
+                print(f"FAIL: {name} ({user_id}) — Discord error: {exc}")
     finally:
         await client.close()
+
+    if failed:
+        sys.exit(f"\n{len(failed)} of {len(config['users'])} user(s) unreachable: "
+                 f"{', '.join(failed)}")
 
 
 if __name__ == "__main__":

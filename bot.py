@@ -1,4 +1,4 @@
-"""Discord alarm bot: DMs one user at times listed in config.yaml."""
+"""Discord alarm bot: DMs one or more users at times listed in config.yaml."""
 
 import logging
 import os
@@ -70,6 +70,17 @@ def parse_days(raw, where):
 
 def parse_time(raw, where):
     """Validate a 24-hour HH:MM string and return it zero-padded."""
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        # YAML 1.1 reads an unquoted 21:30 as sexagesimal — 21*60+30 = 1290 — so
+        # the value arrives here as a number and the obvious error message would
+        # be baffling. Name the real problem instead.
+        hours, minutes = divmod(raw, 60)
+        if 0 <= hours < 24:
+            raise ConfigError(
+                f'{where}: \'time\' must be quoted. YAML reads an unquoted 21:30 as '
+                f'the number {raw}; write it as "{hours:02d}:{minutes:02d}"'
+            )
+
     text = str(raw).strip()
     try:
         return datetime.strptime(text, "%H:%M").strftime("%H:%M")
@@ -77,6 +88,87 @@ def parse_time(raw, where):
         raise ConfigError(
             f"{where}: 'time' must be 24-hour HH:MM (e.g. 09:00 or 22:30), got {raw!r}"
         ) from None
+
+
+def parse_user_id(raw, where):
+    """Validate a single Discord user ID."""
+    try:
+        user_id = int(raw)
+    except (TypeError, ValueError):
+        raise ConfigError(
+            f"{where}: must be a Discord user ID (a long number), got {raw!r}"
+        ) from None
+    if user_id <= 0:
+        raise ConfigError(f"{where}: is still the placeholder — set a real Discord user ID")
+    return user_id
+
+
+def parse_users(data):
+    """Return ({name: user_id}, used_legacy_format).
+
+    The old single-user `user_id:` format is still accepted. The server pulls new
+    code on every restart, so breaking the schema outright would stop the alarms
+    the moment it redeployed. migrate_config.py rewrites the file properly.
+    """
+    raw = data.get("users")
+    if raw is None:
+        if "user_id" not in data:
+            raise ConfigError(
+                "'users' must be a mapping of name -> Discord user ID, e.g.\n"
+                "  users:\n"
+                "    me: 123456789012345678"
+            )
+        log.warning(
+            "config.yaml still uses the old 'user_id:' format. It works, but run "
+            "migrate_config.py to move to 'users:' with per-alarm 'to:'"
+        )
+        return {"me": parse_user_id(data["user_id"], "'user_id'")}, True
+
+    if not isinstance(raw, dict) or not raw:
+        raise ConfigError("'users' must be a non-empty mapping of name -> Discord user ID")
+
+    users = {}
+    for name, value in raw.items():
+        key = str(name).strip()
+        if not key:
+            raise ConfigError("'users' contains an entry with an empty name")
+        users[key] = parse_user_id(value, f"users[{key!r}]")
+    return users, False
+
+
+def parse_recipients(raw, users, where):
+    """Resolve an alarm's `to` into [(name, user_id), ...], keeping config order."""
+    if raw is None:
+        if len(users) == 1:
+            return [next(iter(users.items()))]
+        # Defaulting to everyone would mean adding a user silently signs them up
+        # for every existing alarm. Make it explicit instead.
+        raise ConfigError(
+            f"{where}: 'to' is required once more than one user is defined. "
+            f"Known users: {', '.join(sorted(users))}"
+        )
+
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list) or not raw:
+        raise ConfigError(f"{where}: 'to' must be a user name or a non-empty list of names")
+
+    recipients = []
+    seen_ids = set()
+    for entry in raw:
+        name = str(entry).strip()
+        if name not in users:
+            raise ConfigError(
+                f"{where}: unknown user {name!r}. "
+                f"Known users: {', '.join(sorted(users)) or 'none'}"
+            )
+        # Deduped by resolved ID rather than name, so two aliases pointing at the
+        # same person don't produce two DMs.
+        if users[name] in seen_ids:
+            continue
+        seen_ids.add(users[name])
+        recipients.append((name, users[name]))
+    return recipients
 
 
 def config_signature(path=CONFIG_PATH):
@@ -119,12 +211,7 @@ def load_config(path=CONFIG_PATH):
             f"got {data.get('timezone')!r}"
         ) from None
 
-    try:
-        user_id = int(data["user_id"])
-    except (KeyError, TypeError, ValueError):
-        raise ConfigError("'user_id' must be a Discord user ID (a long number)") from None
-    if user_id <= 0:
-        raise ConfigError("'user_id' is still the placeholder — set your real Discord user ID")
+    users, legacy = parse_users(data)
 
     raw_alarms = data.get("alarms")
     if not isinstance(raw_alarms, list) or not raw_alarms:
@@ -143,9 +230,10 @@ def load_config(path=CONFIG_PATH):
             "time": parse_time(entry.get("time"), where),
             "days": parse_days(entry.get("days"), where),
             "message": message.strip(),
+            "recipients": parse_recipients(entry.get("to"), users, where),
         })
 
-    return {"tz": tz, "user_id": user_id, "alarms": alarms}
+    return {"tz": tz, "users": users, "alarms": alarms, "legacy": legacy}
 
 
 class AlarmBot(discord.Client):
@@ -154,9 +242,11 @@ class AlarmBot(discord.Client):
         # bot never reads message content and needs nothing toggled in the portal.
         super().__init__(intents=discord.Intents.default())
         self.config = config
-        # Alarms already sent today, keyed by (time, message). Deliberately keyed
-        # by content rather than list position so that editing config.yaml doesn't
-        # renumber alarms and make an already-sent one fire twice. Memory only,
+        # Alarms already sent today, keyed by (time, message, user_id). Keyed by
+        # content rather than list position so that editing config.yaml doesn't
+        # renumber alarms and make an already-sent one fire twice, and per user so
+        # that a migration or a rename can't re-send what someone already got.
+        # Memory only,
         # cleared at local midnight — a restart deliberately does not backfill.
         self._fired = set()
         self._fired_date = None
@@ -202,8 +292,8 @@ class AlarmBot(discord.Client):
 
         self.config = config
         log.info(
-            "reloaded config.yaml: %d alarm(s), timezone %s",
-            len(config["alarms"]), config["tz"].key,
+            "reloaded config.yaml: %d alarm(s) for %d user(s), timezone %s",
+            len(config["alarms"]), len(config["users"]), config["tz"].key,
         )
 
     async def check_alarms(self):
@@ -223,26 +313,41 @@ class AlarmBot(discord.Client):
         for alarm in self.config["alarms"]:
             if alarm["time"] != current or weekday not in alarm["days"]:
                 continue
-            key = (alarm["time"], alarm["message"])
-            if key in self._fired:
-                continue
-            self._fired.add(key)
-            await self.send_alarm(alarm)
+            # Tracked per recipient, so one person's failed or blocked DM never
+            # suppresses anyone else's.
+            for name, user_id in alarm["recipients"]:
+                key = (alarm["time"], alarm["message"], user_id)
+                if key in self._fired:
+                    continue
+                self._fired.add(key)
+                try:
+                    await self.send_alarm(alarm, name, user_id)
+                except Exception:  # noqa: BLE001
+                    # send_alarm handles Discord's own errors; this catches the
+                    # unexpected ones so that failing to reach one person can't
+                    # cost everybody else on this alarm — or any later alarm in
+                    # the same tick — their message.
+                    log.exception("unexpected failure sending the %s alarm to %s",
+                                  alarm["time"], name)
 
-    async def send_alarm(self, alarm):
-        """Deliver one alarm. Never raises — a failed send must not kill the loop."""
+    async def send_alarm(self, alarm, name, user_id):
+        """Deliver one alarm to one person.
+
+        Never raises — a failed send must neither kill the loop nor stop the
+        remaining recipients of the same alarm from getting theirs.
+        """
         try:
-            user = await self.fetch_user(self.config["user_id"])
+            user = await self.fetch_user(user_id)
             await user.send(alarm["message"])
-            log.info("sent alarm %s at %s", alarm["index"], alarm["time"])
+            log.info("sent the %s alarm to %s", alarm["time"], name)
         except discord.Forbidden:
             log.error(
-                "cannot DM user %s — they must share a server with the bot and allow "
+                "cannot DM %s (%s) — they must share a server with the bot and allow "
                 "DMs from server members",
-                self.config["user_id"],
+                name, user_id,
             )
         except discord.HTTPException as exc:
-            log.error("Discord rejected alarm %s: %s", alarm["index"], exc)
+            log.error("Discord rejected the %s alarm to %s: %s", alarm["time"], name, exc)
 
     @tick.before_loop
     async def before_tick(self):
@@ -273,8 +378,9 @@ def main():
         sys.exit(f"config.yaml: {exc}")
 
     log.info(
-        "loaded %d alarm(s), timezone %s",
-        len(config["alarms"]), config["tz"].key,
+        "loaded %d alarm(s) for %d user(s) (%s), timezone %s",
+        len(config["alarms"]), len(config["users"]),
+        ", ".join(config["users"]), config["tz"].key,
     )
     try:
         AlarmBot(config).run(token, log_handler=None)

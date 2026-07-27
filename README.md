@@ -1,6 +1,6 @@
 # Alarm Bot
 
-A small Discord bot that DMs you at times you list in a config file.
+A small Discord bot that DMs one or more people at times you list in a config file.
 
 ## Setup
 
@@ -28,38 +28,68 @@ cp .env.example .env                  # then paste your token into it
 cp config.example.yaml config.yaml    # then edit your alarms
 ```
 
-Both `.env` and `config.yaml` are gitignored, so your token, Discord user ID, and personal alarms stay out of the repo. Edit `config.yaml`:
+Both `.env` and `config.yaml` are gitignored, so your token, Discord user IDs, and personal alarms stay out of the repo. Edit `config.yaml`:
 
 ```yaml
 timezone: America/New_York
-user_id: 123456789012345678
+
+users:
+  me: 123456789012345678
+  partner: 987654321098765432
 
 alarms:
   - time: "09:00"
     days: weekdays
     message: "Standup in 15 minutes."
+    to: me
+
+  - time: "20:00"
+    days: everyday
+    message: "Time for meds."
+    to: [me, partner]
 ```
 
-- `user_id` — turn on **Settings → Advanced → Developer Mode**, then right-click yourself → **Copy User ID**.
+- `users` — a name for each person, mapped to their Discord user ID. Names are yours to pick; only `to` uses them. To get an ID, turn on **Settings → Advanced → Developer Mode**, then right-click a user → **Copy User ID**.
 - `timezone` — any IANA name (`America/New_York`, `Europe/London`, `Asia/Kolkata`). Alarm times are interpreted here, not in the host machine's timezone.
-- `time` — 24-hour `HH:MM`.
+- `time` — 24-hour `HH:MM`. **Keep the quotes** — unquoted, YAML reads `21:30` as the number 1290.
 - `days` — `everyday`, `weekdays`, `weekends`, or a list like `[mon, wed, fri]`.
+- `to` — one name or a list of them. Optional while exactly one user is defined; required past that, so adding someone never signs them up for every existing alarm by accident.
+
+Everyone listed under `users` must separately share a server with the bot and allow DMs, exactly as in step 2.
 
 **5. Check that DMs work, then run**
 
 ```bash
-.venv/bin/python check_dm.py    # sends one test DM
+.venv/bin/python check_dm.py    # sends one test DM per user
 .venv/bin/python bot.py
 ```
 
-Run `check_dm.py` first. If it fails, the problem is step 2, not your alarm times.
+Run `check_dm.py` first — it reports per user, so you can see at a glance who the bot can't reach. If it fails, the problem is step 2, not your alarm times.
+
+### Upgrading from the single-user format
+
+The old `user_id: 123` format still works, so pulling this version won't stop your alarms. You'll see a warning on startup until you convert:
+
+```bash
+.venv/bin/python migrate_config.py --dry-run   # preview, changes nothing
+.venv/bin/python migrate_config.py             # rewrite it
+```
+
+It backs the original up to `config.yaml.bak` (never overwriting an earlier backup), writes atomically, and re-loads the result before declaring success — rolling back if the bot would reject it. Running it twice is a no-op, and it refuses to touch a config that is already invalid. The running bot picks the new file up on its next tick, with no restart and no re-sending of anything already delivered today.
+
+On the server the compose mount is read-only, so run it against the host copy from the directory holding `config.yaml`:
+
+```bash
+docker run --rm -v "$PWD:/work" -w /work --entrypoint python alarm-bot-bot migrate_config.py
+```
 
 ## Behaviour worth knowing
 
 - **Alarms missed while the bot was down are skipped, not backfilled.** Restarting at 09:00:30 will not re-send the 09:00 message. Say the word if you'd rather it catch up on startup.
 - **`config.yaml` reloads live.** Save the file and the running bot picks up added, edited, and removed alarms within ~20 seconds. No restart, no `.env` reload (the token is only read at startup).
 - **A bad edit never takes down a running bot.** At startup an unknown day name or malformed time is fatal, so you find out immediately. After startup the same mistake is only logged, and the bot keeps running on the last good config — a typo saved mid-edit shouldn't silently kill every future alarm. Watch the log to confirm an edit was accepted; you'll see either `reloaded config.yaml: N alarm(s)` or the error. Deleting the file is likewise survivable.
-- **Editing won't re-send an alarm that already went out today.** Alarms are tracked by time and message rather than position, so inserting or reordering entries doesn't cause a repeat.
+- **Editing won't re-send an alarm that already went out today.** Alarms are tracked by time, message and recipient rather than list position, so inserting, reordering, renaming a user or migrating the file doesn't cause a repeat.
+- **One unreachable person doesn't affect anyone else.** Each recipient of an alarm is delivered and tracked independently, so a blocked DM costs only that person their message.
 - **A failed send doesn't stop the bot.** Delivery errors are logged and the schedule keeps running.
 - **Daylight saving:** times are matched against your local wall clock continuously, so an alarm inside a *repeated* hour (autumn fall-back) fires once rather than twice. The one gap is spring-forward — an alarm set inside the skipped hour (e.g. `02:30` in `America/New_York`) won't fire that day, because that wall-clock time doesn't exist.
 
@@ -71,7 +101,7 @@ The bot must stay running to fire. On the server:
 git clone https://github.com/KoriKosmos/Alarm-Bot.git
 cd Alarm-Bot
 cp .env.example .env                  # paste your bot token
-cp config.example.yaml config.yaml    # set user_id, timezone, alarms
+cp config.example.yaml config.yaml    # set users, timezone, alarms
 docker compose up -d
 docker compose logs -f
 ```
@@ -131,7 +161,8 @@ journalctl --user -u alarm-bot -f
 | `bot.py` | The bot: config loading, validation, live reload, scheduling loop |
 | `config.example.yaml` | Template to copy — the version that is committed |
 | `config.yaml` | Your alarms — **gitignored**, reloaded live while running |
-| `check_dm.py` | One-shot test that DMs actually get through |
+| `check_dm.py` | One-shot test that DMs get through, per user |
+| `migrate_config.py` | Converts an old single-user config to the `users:` format |
 | `.env` | Your bot token — **never commit** (already gitignored) |
 | `Dockerfile` | Image: Python + git + baked dependencies |
 | `entrypoint.sh` | Pulls the latest code, then starts the bot |

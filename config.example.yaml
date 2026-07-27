@@ -1,27 +1,41 @@
 # Template. Copy to config.yaml and edit — config.yaml is gitignored, so your
-# real user ID and personal alarms stay out of the repo:
+# real user IDs and personal alarms stay out of the repo:
 #
 #     cp config.example.yaml config.yaml
 #
-# Who to DM and in what timezone the alarm times below are interpreted.
-# user_id: enable Developer Mode in Discord, right-click the user -> Copy User ID.
 # timezone: any IANA name, e.g. America/New_York, Europe/London, Asia/Kolkata.
+# All alarm times below are interpreted in it, whatever the server's own clock.
 timezone: America/New_York
-user_id: 000000000000000000
 
-# Each alarm needs a time (24-hour HH:MM), the days it runs, and a message.
+# Everyone the bot can DM, as name -> Discord user ID. The names are only used
+# by 'to' below, so call people whatever you like. To find an ID: enable
+# Developer Mode in Discord, then right-click a user -> Copy User ID.
+# Each person must share a server with the bot and allow DMs from server
+# members, or Discord will refuse. Check with: python check_dm.py
+users:
+  me: 000000000000000000
+  # partner: 000000000000000000
+
+# Each alarm needs a time (24-hour HH:MM), the days it runs, a message, and
+# 'to' — which users receive it.
 # days accepts: everyday / daily, weekdays, weekends, or a list of
 # mon tue wed thu fri sat sun (full names like "monday" work too).
+# 'to' accepts one name or a list. It may be omitted only while exactly one
+# user is defined; past that it is required, so adding someone never signs
+# them up for every existing alarm by accident.
 # The running bot re-reads this file when you save it — no restart needed.
 alarms:
   - time: "09:00"
     days: weekdays
     message: "Standup in 15 minutes."
+    to: me
 
   - time: "13:30"
     days: [mon, wed, fri]
     message: "Lunch break — step away from the screen."
+    to: [me]
 
   - time: "22:30"
     days: everyday
     message: "Wind-down time."
+    to: [me]
