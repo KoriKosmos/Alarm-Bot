@@ -56,8 +56,9 @@ Run `check_dm.py` first. If it fails, the problem is step 2, not your alarm time
 ## Behaviour worth knowing
 
 - **Alarms missed while the bot was down are skipped, not backfilled.** Restarting at 09:00:30 will not re-send the 09:00 message. Say the word if you'd rather it catch up on startup.
-- **Config is read once at startup.** Edit `config.yaml`, then restart the bot.
-- **Bad config is fatal.** An unknown day name or malformed time exits with an error instead of silently never firing — a quiet alarm is indistinguishable from a working one until you miss something.
+- **`config.yaml` reloads live.** Save the file and the running bot picks up added, edited, and removed alarms within ~20 seconds. No restart, no `.env` reload (the token is only read at startup).
+- **A bad edit never takes down a running bot.** At startup an unknown day name or malformed time is fatal, so you find out immediately. After startup the same mistake is only logged, and the bot keeps running on the last good config — a typo saved mid-edit shouldn't silently kill every future alarm. Watch the log to confirm an edit was accepted; you'll see either `reloaded config.yaml: N alarm(s)` or the error. Deleting the file is likewise survivable.
+- **Editing won't re-send an alarm that already went out today.** Alarms are tracked by time and message rather than position, so inserting or reordering entries doesn't cause a repeat.
 - **A failed send doesn't stop the bot.** Delivery errors are logged and the schedule keeps running.
 - **Daylight saving:** times are matched against your local wall clock continuously, so an alarm inside a *repeated* hour (autumn fall-back) fires once rather than twice. The one gap is spring-forward — an alarm set inside the skipped hour (e.g. `02:30` in `America/New_York`) won't fire that day, because that wall-clock time doesn't exist.
 
@@ -88,7 +89,7 @@ journalctl --user -u alarm-bot -f
 
 | File | Purpose |
 | --- | --- |
-| `bot.py` | The bot: config loading, validation, scheduling loop |
-| `config.yaml` | Your alarms — safe to commit |
+| `bot.py` | The bot: config loading, validation, live reload, scheduling loop |
+| `config.yaml` | Your alarms — safe to commit, reloaded live while running |
 | `check_dm.py` | One-shot test that DMs actually get through |
 | `.env` | Your bot token — **never commit** (already gitignored) |

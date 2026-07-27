@@ -73,6 +73,19 @@ def parse_time(raw, where):
         ) from None
 
 
+def config_signature(path=CONFIG_PATH):
+    """Cheap fingerprint used to notice edits. Returns None if the file is gone.
+
+    mtime is nanosecond-resolution and paired with size, so two saves in the same
+    second still register as a change.
+    """
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
 def load_config(path=CONFIG_PATH):
     """Read and fully validate config.yaml. Anything wrong raises ConfigError.
 
@@ -133,10 +146,13 @@ class AlarmBot(discord.Client):
         # bot never reads message content and needs nothing toggled in the portal.
         super().__init__(intents=discord.Intents.default())
         self.config = config
-        # Keys of alarms already sent today, as (index, "HH:MM"). Memory only,
+        # Alarms already sent today, keyed by (time, message). Deliberately keyed
+        # by content rather than list position so that editing config.yaml doesn't
+        # renumber alarms and make an already-sent one fire twice. Memory only,
         # cleared at local midnight — a restart deliberately does not backfill.
         self._fired = set()
         self._fired_date = None
+        self._config_sig = config_signature(CONFIG_PATH)
 
     async def setup_hook(self):
         self.tick.start()
@@ -153,7 +169,38 @@ class AlarmBot(discord.Client):
         except Exception:  # noqa: BLE001
             log.exception("tick failed, continuing")
 
+    def maybe_reload(self):
+        """Re-read config.yaml if it changed on disk. Never raises.
+
+        Unlike startup, a bad config here is NOT fatal: the bot keeps running on
+        the last good one. Exiting would mean a typo saved mid-edit silently kills
+        every future alarm, which is far worse than ignoring the edit.
+        """
+        signature = config_signature(CONFIG_PATH)
+        if signature is None:
+            log.error("config.yaml is missing, keeping the config already loaded")
+            return
+        if signature == self._config_sig:
+            return
+
+        # Record the new signature before parsing, so a file left in a broken
+        # state doesn't re-log the same error on every tick.
+        self._config_sig = signature
+        try:
+            config = load_config(CONFIG_PATH)
+        except ConfigError as exc:
+            log.error("config.yaml changed but is invalid, keeping previous config: %s", exc)
+            return
+
+        self.config = config
+        log.info(
+            "reloaded config.yaml: %d alarm(s), timezone %s",
+            len(config["alarms"]), config["tz"].key,
+        )
+
     async def check_alarms(self):
+        self.maybe_reload()
+
         # Read the wall clock fresh every tick rather than sleeping until the
         # next occurrence; that is what keeps this correct across DST shifts.
         now = datetime.now(self.config["tz"])
@@ -168,7 +215,7 @@ class AlarmBot(discord.Client):
         for alarm in self.config["alarms"]:
             if alarm["time"] != current or weekday not in alarm["days"]:
                 continue
-            key = (alarm["index"], current)
+            key = (alarm["time"], alarm["message"])
             if key in self._fired:
                 continue
             self._fired.add(key)
