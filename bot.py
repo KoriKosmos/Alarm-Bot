@@ -96,7 +96,9 @@ def load_config(path=CONFIG_PATH):
         with open(path, encoding="utf-8") as handle:
             data = yaml.safe_load(handle)
     except FileNotFoundError:
-        raise ConfigError(f"no config file at {path}") from None
+        raise ConfigError(
+            f"no config file at {path}. Create one with: cp config.example.yaml config.yaml"
+        ) from None
     except yaml.YAMLError as exc:
         raise ConfigError(f"{path} is not valid YAML: {exc}") from None
 

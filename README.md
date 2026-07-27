@@ -24,10 +24,11 @@ python3 -m venv .venv
 **4. Configure**
 
 ```bash
-cp .env.example .env    # then paste your token into it
+cp .env.example .env                  # then paste your token into it
+cp config.example.yaml config.yaml    # then edit your alarms
 ```
 
-Edit `config.yaml`:
+Both `.env` and `config.yaml` are gitignored, so your token, Discord user ID, and personal alarms stay out of the repo. Edit `config.yaml`:
 
 ```yaml
 timezone: America/New_York
@@ -90,6 +91,7 @@ journalctl --user -u alarm-bot -f
 | File | Purpose |
 | --- | --- |
 | `bot.py` | The bot: config loading, validation, live reload, scheduling loop |
-| `config.yaml` | Your alarms — safe to commit, reloaded live while running |
+| `config.example.yaml` | Template to copy — the version that is committed |
+| `config.yaml` | Your alarms — **gitignored**, reloaded live while running |
 | `check_dm.py` | One-shot test that DMs actually get through |
 | `.env` | Your bot token — **never commit** (already gitignored) |

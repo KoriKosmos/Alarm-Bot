@@ -1,3 +1,8 @@
+# Template. Copy to config.yaml and edit — config.yaml is gitignored, so your
+# real user ID and personal alarms stay out of the repo:
+#
+#     cp config.example.yaml config.yaml
+#
 # Who to DM and in what timezone the alarm times below are interpreted.
 # user_id: enable Developer Mode in Discord, right-click the user -> Copy User ID.
 # timezone: any IANA name, e.g. America/New_York, Europe/London, Asia/Kolkata.
@@ -7,6 +12,7 @@ user_id: 000000000000000000
 # Each alarm needs a time (24-hour HH:MM), the days it runs, and a message.
 # days accepts: everyday / daily, weekdays, weekends, or a list of
 # mon tue wed thu fri sat sun (full names like "monday" work too).
+# The running bot re-reads this file when you save it — no restart needed.
 alarms:
   - time: "09:00"
     days: weekdays

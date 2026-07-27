@@ -1,4 +1,12 @@
 .env
+
+# Your personal alarms and Discord user ID. Copy config.example.yaml instead.
+config.yaml
+
+# editor swap files (Kate, Vim)
+.*.kate-swp
+*.swp
+
 .venv/
 venv/
 __pycache__/
