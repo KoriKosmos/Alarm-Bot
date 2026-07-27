@@ -77,10 +77,10 @@ The old `user_id: 123` format still works, so pulling this version won't stop yo
 
 It backs the original up to `config.yaml.bak` (never overwriting an earlier backup), writes atomically, and re-loads the result before declaring success — rolling back if the bot would reject it. Running it twice is a no-op, and it refuses to touch a config that is already invalid. The running bot picks the new file up on its next tick, with no restart and no re-sending of anything already delivered today.
 
-On the server the compose mount is read-only, so run it against the host copy from the directory holding `config.yaml`:
+On the server the compose mount is read-only, so run it against the host copy from the directory holding `config.yaml`. Pass the filename explicitly — the image points `ALARM_CONFIG` at the mount path the *running* bot uses, which doesn't exist in a one-off container:
 
 ```bash
-docker run --rm -v "$PWD:/work" -w /work --entrypoint python alarm-bot-bot migrate_config.py
+docker run --rm -v "$PWD:/work" -w /work --entrypoint python alarm-bot-bot migrate_config.py config.yaml
 ```
 
 ## Behaviour worth knowing

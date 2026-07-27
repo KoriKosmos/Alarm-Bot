@@ -20,7 +20,7 @@ under time pressure.
 Inside Docker the compose mount is read-only, so run it against the host copy:
 
     docker run --rm -v "$PWD:/work" -w /work --entrypoint python alarm-bot-bot \\
-        migrate_config.py
+        migrate_config.py config.yaml
 """
 
 import argparse
@@ -103,7 +103,7 @@ def readonly_hint(exc):
         "\nThe compose file mounts the config read-only, so this cannot be run with "
         "`docker compose exec`. From the directory holding config.yaml:\n"
         '  docker run --rm -v "$PWD:/work" -w /work --entrypoint python '
-        "alarm-bot-bot migrate_config.py"
+        "alarm-bot-bot migrate_config.py config.yaml"
     )
 
 
