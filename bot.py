@@ -11,7 +11,12 @@ import yaml
 from discord.ext import tasks
 from dotenv import load_dotenv
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.yaml")
+# Defaults to config.yaml beside this file. ALARM_CONFIG overrides it, which is
+# what the container uses: the code tree is re-cloned on every start, so config
+# has to live outside it to survive.
+CONFIG_PATH = os.environ.get("ALARM_CONFIG") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "config.yaml"
+)
 
 # How often to check the clock. Deliberately faster than the one-minute
 # resolution we match on, so a tick landing at :59.6 can't skip a minute.

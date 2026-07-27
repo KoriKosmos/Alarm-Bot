@@ -1,0 +1,14 @@
+# The image only needs requirements.txt and entrypoint.sh — the application
+# code is cloned at runtime, not copied in at build time.
+.git
+.gitignore
+.env
+config.yaml
+.venv
+venv
+__pycache__
+*.py[cod]
+README.md
+docker-compose.yml
+update-deploy.sh
+Dockerfile

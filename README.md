@@ -63,9 +63,47 @@ Run `check_dm.py` first. If it fails, the problem is step 2, not your alarm time
 - **A failed send doesn't stop the bot.** Delivery errors are logged and the schedule keeps running.
 - **Daylight saving:** times are matched against your local wall clock continuously, so an alarm inside a *repeated* hour (autumn fall-back) fires once rather than twice. The one gap is spring-forward — an alarm set inside the skipped hour (e.g. `02:30` in `America/New_York`) won't fire that day, because that wall-clock time doesn't exist.
 
-## Keeping it running
+## Running on a server (Docker)
 
-The bot must stay running to fire. For an always-on setup, use a systemd user service:
+The bot must stay running to fire. On the server:
+
+```bash
+git clone https://github.com/KoriKosmos/Alarm-Bot.git
+cd Alarm-Bot
+cp .env.example .env                  # paste your bot token
+cp config.example.yaml config.yaml    # set user_id, timezone, alarms
+docker compose up -d
+docker compose logs -f
+```
+
+Both `.env` and `config.yaml` are gitignored, so a fresh clone has neither — you must create them on the server before the first start, or the container will exit with a config error.
+
+### Deploying updates
+
+The container pulls the repo itself every time it starts, so shipping a code change is:
+
+```bash
+docker compose restart
+```
+
+That's the normal path — no rebuild, no `git pull` on the server. Because the repo is public, the container needs no credentials to do it.
+
+You only need the full redeploy when the *image* changes — `requirements.txt`, `Dockerfile`, `entrypoint.sh`, or `docker-compose.yml`:
+
+```bash
+./update-deploy.sh
+```
+
+### How it fits together
+
+- **Code** is cloned into a named volume at container start, not baked into the image. A failed fetch (GitHub down) is logged as a warning and the bot starts on the last code it pulled, rather than not starting at all.
+- **Dependencies** are baked in at build time, so a restart never depends on PyPI being reachable. Changing `requirements.txt` therefore needs `./update-deploy.sh`.
+- **`config.yaml` stays on the host**, mounted read-only, and is found via the `ALARM_CONFIG` env var. It sits outside the code tree so the start-up `git reset --hard` can't touch it. Editing it on the host is picked up live by the running bot — no restart.
+- **Restarts don't backfill.** An alarm whose time falls inside a redeploy window is skipped, same as any other restart.
+
+### systemd instead
+
+If you'd rather not use Docker, a user service works too — but note it won't self-update:
 
 ```ini
 # ~/.config/systemd/user/alarm-bot.service
@@ -95,3 +133,7 @@ journalctl --user -u alarm-bot -f
 | `config.yaml` | Your alarms — **gitignored**, reloaded live while running |
 | `check_dm.py` | One-shot test that DMs actually get through |
 | `.env` | Your bot token — **never commit** (already gitignored) |
+| `Dockerfile` | Image: Python + git + baked dependencies |
+| `entrypoint.sh` | Pulls the latest code, then starts the bot |
+| `docker-compose.yml` | Server deployment: env, config mount, restart policy |
+| `update-deploy.sh` | Full redeploy for when the image itself changes |

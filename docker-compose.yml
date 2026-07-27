@@ -1,0 +1,27 @@
+services:
+  bot:
+    build: .
+    environment:
+      # Where the entrypoint pulls from on every start. Point BRANCH elsewhere
+      # to deploy a branch without touching the image.
+      - REPO_URL=https://github.com/KoriKosmos/Alarm-Bot.git
+      - BRANCH=main
+      - ALARM_CONFIG=/config/config.yaml
+    env_file:
+      # Supplies DISCORD_TOKEN. Not in the image or the repo — put it on the
+      # server by hand.
+      - .env
+    volumes:
+      # Mounted as a directory, not as ./config.yaml:/config/config.yaml, on
+      # purpose: editors that save by writing a temp file and renaming it would
+      # break a single-file bind mount, and the container would keep serving the
+      # old alarms. With the directory mounted, editing config.yaml on the host
+      # is picked up live by the running bot.
+      - .:/config:ro
+      # Persists the cloned code between restarts, so a failed fetch has
+      # something to fall back on.
+      - app_src:/app/src
+    restart: unless-stopped
+
+volumes:
+  app_src:
