@@ -6,6 +6,7 @@ import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import aiohttp
 import discord
 import yaml
 from discord.ext import tasks
@@ -282,6 +283,13 @@ def main():
             "Discord rejected the bot token in .env. Get a fresh one at "
             "https://discord.com/developers/applications -> your app -> Bot -> Reset Token."
         )
+    except aiohttp.ClientError as exc:
+        # Discord is unreachable. In a container this is usually just DNS not
+        # being ready yet in the first second after boot. Exit non-zero with one
+        # clean line and let the supervisor restart us — Docker's restart policy
+        # already does this well, so don't reimplement backoff here. Once the
+        # bot is connected, discord.py handles reconnects itself.
+        sys.exit(f"Cannot reach Discord ({exc}). Exiting so the restart policy can retry.")
 
 
 if __name__ == "__main__":
