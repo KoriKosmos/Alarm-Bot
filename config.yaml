@@ -1,0 +1,21 @@
+# Who to DM and in what timezone the alarm times below are interpreted.
+# user_id: enable Developer Mode in Discord, right-click the user -> Copy User ID.
+# timezone: any IANA name, e.g. America/New_York, Europe/London, Asia/Kolkata.
+timezone: America/New_York
+user_id: 000000000000000000
+
+# Each alarm needs a time (24-hour HH:MM), the days it runs, and a message.
+# days accepts: everyday / daily, weekdays, weekends, or a list of
+# mon tue wed thu fri sat sun (full names like "monday" work too).
+alarms:
+  - time: "09:00"
+    days: weekdays
+    message: "Standup in 15 minutes."
+
+  - time: "13:30"
+    days: [mon, wed, fri]
+    message: "Lunch break — step away from the screen."
+
+  - time: "22:30"
+    days: everyday
+    message: "Wind-down time."
